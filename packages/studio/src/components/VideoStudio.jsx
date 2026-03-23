@@ -317,10 +317,15 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
 
     // ── close dropdown on outside click ─────────────────────────────────────
     useEffect(() => {
-        const handler = () => setOpenDropdown(null);
+        if (!openDropdown) return;
+        const handler = (e) => {
+            const isInsideDropdown = [modelBtnRef, arBtnRef, durationBtnRef, resolutionBtnRef, qualityBtnRef, modeBtnRef]
+                .some(ref => ref.current && ref.current.contains(e.target));
+            if (!isInsideDropdown) setOpenDropdown(null);
+        };
         window.addEventListener('click', handler);
         return () => window.removeEventListener('click', handler);
-    }, []);
+    }, [openDropdown]);
 
     // ── textarea auto-resize ──────────────────────────────────────────────────
     const handlePromptInput = (e) => {
