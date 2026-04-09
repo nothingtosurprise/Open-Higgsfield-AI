@@ -41,6 +41,7 @@ export default function ApiKeyModal({ onSave }) {
               onChange={(e) => { setKey(e.target.value); setError(''); }}
               placeholder="Enter your API key..."
               className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-white placeholder:text-white/20 focus:outline-none focus:border-[#d9ff00]/40 transition-colors"
+              suppressHydrationWarning
             />
             {error && <p className="mt-1 text-red-400 text-xs">{error}</p>}
           </div>
@@ -48,6 +49,7 @@ export default function ApiKeyModal({ onSave }) {
           <button
             type="submit"
             className="w-full bg-[#d9ff00] text-black font-black py-3 rounded-xl hover:opacity-90 transition-opacity"
+            suppressHydrationWarning
           >
             Launch Studio
           </button>

@@ -192,6 +192,10 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
     const [selectedQuality, setSelectedQuality] = useState(defaultModel.inputs?.quality?.default || '');
     const [selectedMode, setSelectedMode] = useState('');
 
+    // ── upload progress ──
+    const [imageProgress, setImageProgress] = useState(0);
+    const [videoProgress, setVideoProgress] = useState(0);
+
     // ── control visibility ──
     const [showAr, setShowAr] = useState(true);
     const [showDuration, setShowDuration] = useState(true);
@@ -201,7 +205,6 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
 
     // ── uploads ──
     const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
-    const [uploadedImagePreview, setUploadedImagePreview] = useState(null);
     const [imageUploading, setImageUploading] = useState(false);
     const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
     const [videoUploading, setVideoUploading] = useState(false);
@@ -323,11 +326,18 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
     const handleImageFileChange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+          alert("Image exceeds 10MB limit.");
+          return;
+        }
         setImageUploading(true);
+        setImageProgress(0);
+        
         try {
-            const url = await uploadFile(apiKey, file);
+            const url = await uploadFile(apiKey, file, (pct) => {
+                setImageProgress(pct);
+            });
             setUploadedImageUrl(url);
-            setUploadedImagePreview(URL.createObjectURL(file));
 
             // Clear v2v if active
             setUploadedVideoUrl(null);
@@ -347,13 +357,13 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             alert(`Image upload failed: ${err.message}`);
         } finally {
             setImageUploading(false);
+            setImageProgress(0);
             if (imageFileInputRef.current) imageFileInputRef.current.value = '';
         }
     };
 
     const clearImageUpload = () => {
         setUploadedImageUrl(null);
-        setUploadedImagePreview(null);
         setImageMode(false);
         const first = t2vModels[0];
         setSelectedModel(first.id);
@@ -366,16 +376,22 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
     const handleVideoFileChange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        if (file.size > 50 * 1024 * 1024) {
+          alert("Video exceeds 50MB limit.");
+          return;
+        }
         setVideoUploading(true);
+        setVideoProgress(0);
         try {
-            const url = await uploadFile(apiKey, file);
+            const url = await uploadFile(apiKey, file, (pct) => {
+                setVideoProgress(pct);
+            });
             setUploadedVideoUrl(url);
             setUploadedVideoName(file.name);
 
             // Clear image mode if active
             if (imageMode) {
                 setUploadedImageUrl(null);
-                setUploadedImagePreview(null);
                 setImageMode(false);
             }
             setV2vMode(true);
@@ -390,6 +406,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             alert(`Video upload failed: ${err.message}`);
         } finally {
             setVideoUploading(false);
+            setVideoProgress(0);
             if (videoFileInputRef.current) videoFileInputRef.current.value = '';
         }
     };
@@ -763,10 +780,15 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                                         className={`w-10 h-10 shrink-0 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden ${uploadedImageUrl ? 'border-primary/60 bg-primary/10' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40'} group`}
                                     >
                                         {imageUploading ? (
-                                            <span className="animate-spin text-primary text-sm">◌</span>
-                                        ) : uploadedImageUrl ? (
-                                            <img src={uploadedImagePreview} alt="" className="w-full h-full object-cover rounded-xl" />
-                                        ) : (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
+                                                <div className="w-4 h-4 rounded-full border border-primary/30 border-t-primary animate-spin mb-0.5" />
+                                                <span className="text-[8px] font-black text-primary">{imageProgress}%</span>
+                                            </div>
+                                        ) : null}
+                                        
+                                        {uploadedImageUrl ? (
+                                            <img src={uploadedImageUrl} alt="" className={`w-full h-full object-cover rounded-xl ${imageUploading ? 'opacity-40 blur-[2px]' : 'opacity-100'}`} />
+                                        ) : !imageUploading && (
                                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted group-hover:text-primary transition-colors">
                                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                                                 <circle cx="8.5" cy="8.5" r="1.5" />
@@ -792,9 +814,12 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                                         className={`w-10 h-10 shrink-0 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden ${uploadedVideoUrl ? 'border-primary/60 bg-white/5' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40'} group`}
                                     >
                                         {videoUploading ? (
-                                            <span className="animate-spin text-primary text-sm">◌</span>
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
+                                                <div className="w-4 h-4 rounded-full border border-primary/30 border-t-primary animate-spin mb-0.5" />
+                                                <span className="text-[8px] font-black text-primary">{videoProgress}%</span>
+                                            </div>
                                         ) : uploadedVideoUrl ? (
-                                            <VideoReadySvg />
+                                            <video src={uploadedVideoUrl} className={`w-full h-full object-cover rounded-xl ${videoUploading ? 'opacity-40 blur-[2px]' : 'opacity-100'}`} muted />
                                         ) : (
                                             <VideoIconSvg className="text-muted group-hover:text-primary transition-colors" />
                                         )}

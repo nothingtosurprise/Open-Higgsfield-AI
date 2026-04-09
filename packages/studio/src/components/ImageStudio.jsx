@@ -16,13 +16,6 @@ import {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function generateThumbnail(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result);
-    reader.readAsDataURL(file);
-  });
-}
 
 async function downloadImage(url, filename) {
   try {
@@ -48,6 +41,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
   const [uploading, setUploading] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState([]); // [{url, thumbnail}]
   const [uploadHistory, setUploadHistory] = useState([]); // [{id, name, url, thumbnail}]
+  const [lastUploadProgress, setLastUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
   const panelRef = useRef(null);
   const triggerRef = useRef(null);
@@ -71,14 +65,11 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
 
   // When maxImages changes, trim excess selections
   useEffect(() => {
-    setSelectedEntries((prev) => {
-      if (prev.length > maxImages) {
-        const trimmed = prev.slice(0, maxImages);
-        if (trimmed.length === 0) onClear?.();
-        return trimmed;
-      }
-      return prev;
-    });
+    if (selectedEntries.length > maxImages) {
+      const trimmed = selectedEntries.slice(0, maxImages);
+      setSelectedEntries(trimmed);
+      if (trimmed.length === 0) onClear?.();
+    }
     if (fileInputRef.current) {
       fileInputRef.current.multiple = maxImages > 1;
     }
@@ -88,7 +79,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
     (entries) => {
       if (!entries.length) return;
       const urls = entries.map((e) => e.url);
-      onSelect({ url: urls[0], urls, thumbnail: entries[0].thumbnail });
+      onSelect({ url: urls[0], urls, thumbnail: entries[0].url });
     },
     [onSelect]
   );
@@ -98,56 +89,66 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
     if (!files.length) return;
     e.target.value = "";
 
+    const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+    const tooLarge = files.filter(f => f.size > MAX_IMAGE_SIZE);
+    if (tooLarge.length > 0) {
+      alert(`The following images are too large (max 10MB): ${tooLarge.map(f => f.name).join(', ')}`);
+      return;
+    }
+
     setUploading(true);
     try {
-      if (maxImages === 1) {
-        const file = files[0];
-        const [uploadedUrl, thumbnail] = await Promise.all([
-          uploadFile(apiKey, file),
-          generateThumbnail(file),
-        ]);
-        const entry = { id: Date.now().toString(), name: file.name, url: uploadedUrl, thumbnail };
-        setUploadHistory((prev) => [entry, ...prev]);
-        const newSelected = [{ url: uploadedUrl, thumbnail }];
-        setSelectedEntries(newSelected);
-        fireOnSelect(newSelected);
-        setPanelOpen(false);
-      } else {
-        const slots = maxImages - selectedEntries.length;
-        const toUpload = files.slice(0, Math.max(slots, 1));
+      const toUpload =
+        maxImages === 1 ? files.slice(0, 1) : files.slice(0, maxImages - selectedEntries.length || 1);
 
-        const results = await Promise.all(
-          toUpload.map(async (file) => {
-            const [uploadedUrl, thumbnail] = await Promise.all([
-              uploadFile(apiKey, file),
-              generateThumbnail(file),
-            ]);
-            return {
-              id: Date.now().toString() + Math.random(),
-              name: file.name,
-              url: uploadedUrl,
-              thumbnail,
-            };
-          })
-        );
+      await Promise.all(
+        toUpload.map(async (file) => {
+          const id = Date.now().toString() + Math.random();
 
-        setUploadHistory((prev) => [...results, ...prev]);
-        setSelectedEntries((prev) => {
-          const next = [...prev];
-          results.forEach((r) => {
-            if (next.length < maxImages) {
-              next.push({ url: r.url, thumbnail: r.thumbnail });
+          // Add a placeholder to history immediately without local preview
+          const placeholder = { id, name: file.name, url: null, progress: 0 };
+          setUploadHistory((prev) => [placeholder, ...prev]);
+
+          try {
+            const uploadedUrl = await uploadFile(apiKey, file, (pct) => {
+              setLastUploadProgress(pct);
+              setUploadHistory((prev) =>
+                prev.map((h) => (h.id === id ? { ...h, progress: pct } : h))
+              );
+            });
+
+            // Update history with real URL and Mark as 100%
+            setUploadHistory((prev) =>
+              prev.map((h) => {
+                if (h.id === id) {
+                  return { ...h, url: uploadedUrl, progress: 100 };
+                }
+                return h;
+              })
+            );
+
+            // Auto-select if there's room
+            if (selectedEntries.length < maxImages) {
+              const newEntry = { url: uploadedUrl };
+              setSelectedEntries((prev) => [...prev, newEntry]);
+
+              if (maxImages === 1) {
+                fireOnSelect([newEntry]);
+                setPanelOpen(false);
+              }
             }
-          });
-          return next;
-        });
-        setPanelOpen(true);
-      }
+          } catch (err) {
+            console.error("[UploadButton] Upload failed for", file.name, err);
+            setUploadHistory((prev) => prev.filter((h) => h.id !== id));
+            throw err;
+          }
+        })
+      );
     } catch (err) {
-      console.error("[UploadButton] Upload failed:", err);
       alert(`Image upload failed: ${err.message}`);
     } finally {
       setUploading(false);
+      setLastUploadProgress(0);
     }
   };
 
@@ -158,32 +159,32 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
     if (atMax) return;
 
     if (maxImages === 1) {
-      const newSelected = [{ url: entry.url, thumbnail: entry.thumbnail }];
+      const newSelected = [{ url: entry.url, localUrl: entry.localUrl }];
       setSelectedEntries(newSelected);
       fireOnSelect(newSelected);
       setPanelOpen(false);
     } else {
-      setSelectedEntries((prev) => {
-        let next;
-        if (isSelected) {
-          next = prev.filter((_, i) => i !== selIdx);
-          if (next.length === 0) onClear?.();
-        } else {
-          next = [...prev, { url: entry.url, thumbnail: entry.thumbnail }];
-        }
-        return next;
-      });
+      let next;
+      if (isSelected) {
+        next = selectedEntries.filter((_, i) => i !== selIdx);
+        if (next.length === 0) onClear?.();
+      } else {
+        next = [...selectedEntries, { url: entry.url, localUrl: entry.localUrl }];
+      }
+      setSelectedEntries(next);
     }
   };
 
   const handleRemoveFromHistory = (e, entry) => {
     e.stopPropagation();
+    if (entry.localUrl) URL.revokeObjectURL(entry.localUrl);
     setUploadHistory((prev) => prev.filter((h) => h.id !== entry.id));
-    setSelectedEntries((prev) => {
-      const next = prev.filter((s) => s.url !== entry.url);
+    
+    const next = selectedEntries.filter((s) => s.url !== entry.url);
+    if (next.length !== selectedEntries.length) {
+      setSelectedEntries(next);
       if (next.length === 0) onClear?.();
-      return next;
-    });
+    }
   };
 
   const handleDone = (e) => {
@@ -206,14 +207,18 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
 
   // Trigger icon content
   let triggerContent;
-  if (uploading) {
-    triggerContent = (
-      <span className="animate-spin text-primary text-sm">◌</span>
-    );
-  } else if (hasSelection) {
+  if (hasSelection || uploading) {
+    const mainEntry = selectedEntries[0] || uploadHistory[0];
     const canAddMore = isMulti && count < maxImages;
     let badge;
-    if (count > 1) {
+    if (uploading && !hasSelection) {
+      badge = (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
+          <div className="w-4 h-4 rounded-full border border-primary/30 border-t-primary animate-spin mb-0.5" />
+          <span className="text-[8px] font-black text-primary">{lastUploadProgress}%</span>
+        </div>
+      );
+    } else if (count > 1) {
       badge = (
         <div className="absolute bottom-0.5 right-0.5 min-w-[16px] h-4 bg-primary rounded-full flex items-center justify-center px-0.5">
           <span className="text-[9px] font-black text-black leading-none">{count}</span>
@@ -236,8 +241,21 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
     }
     triggerContent = (
       <>
-        <img src={selectedEntries[0].thumbnail} alt="" className="w-full h-full object-cover" />
-        {badge}
+        {uploading && hasSelection && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-10">
+            <div className="w-4 h-4 rounded-full border border-primary/30 border-t-primary animate-spin mb-0.5" />
+            <span className="text-[8px] font-black text-primary">{lastUploadProgress}%</span>
+          </div>
+        )}
+        {mainEntry?.url ? (
+          <img src={mainEntry.url} alt="" className={`w-full h-full object-cover transition-all duration-300 ${uploading && hasSelection ? 'blur-[2px] scale-110 opacity-60' : 'blur-0 scale-100 opacity-100'}`} />
+        ) : (
+           <div className="w-full h-full flex flex-col items-center justify-center bg-white/5 animate-pulse">
+             <div className="w-4 h-4 rounded-full border border-primary/20 border-t-primary animate-spin mb-0.5" />
+             <span className="text-[8px] font-black text-primary">{lastUploadProgress}%</span>
+           </div>
+        )}
+        {!uploading && badge}
       </>
     );
   } else {
@@ -382,27 +400,40 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
                   <div
                     key={entry.id}
                     title={entry.name}
-                    onClick={() => handleCellClick(entry)}
+                    onClick={() => entry.url && handleCellClick(entry)}
                     className={`relative rounded-xl overflow-hidden border-2 cursor-pointer group/cell aspect-square transition-all ${
                       isSelected ? "border-primary shadow-glow" : "border-white/10 hover:border-white/30"
-                    } ${atMax ? "opacity-40 cursor-not-allowed" : ""}`}
+                    } ${atMax ? "opacity-40 cursor-not-allowed" : ""} ${!entry.url ? "cursor-wait" : ""}`}
                   >
-                    <img src={entry.thumbnail} alt={entry.name} className="w-full h-full object-cover" />
+                    {entry.url ? (
+                      <img
+                        src={entry.url}
+                        alt={entry.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-white/5 flex flex-col items-center justify-center">
+                         <div className="w-8 h-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mb-1" />
+                         <span className="text-[10px] font-black text-primary">{entry.progress}%</span>
+                      </div>
+                    )}
 
                     {/* Hover overlay with delete */}
-                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/cell:opacity-100 transition-opacity flex items-end justify-end p-1">
-                      <button
-                        type="button"
-                        title="Remove from history"
-                        onClick={(e) => handleRemoveFromHistory(e, entry)}
-                        className="w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-md flex items-center justify-center transition-colors"
-                      >
-                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                          <line x1="18" y1="6" x2="6" y2="18" />
-                          <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
-                    </div>
+                    {entry.url && (
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/cell:opacity-100 transition-opacity flex items-end justify-end p-1">
+                        <button
+                          type="button"
+                          title="Remove from history"
+                          onClick={(e) => handleRemoveFromHistory(e, entry)}
+                          className="w-5 h-5 bg-red-500/80 hover:bg-red-500 rounded-md flex items-center justify-center transition-colors"
+                        >
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
 
                     {/* Selection badge */}
                     {isSelected && (

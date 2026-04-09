@@ -19,7 +19,7 @@ const UPLOAD_STATE = {
     READY: 'ready',
 };
 
-function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, fileName, apiKey }) {
+function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, progress, fileName, previewUrl, isVideo, apiKey }) {
     const inputRef = useRef(null);
 
     const handleClick = (e) => {
@@ -72,18 +72,29 @@ function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState
                 </div>
             )}
 
-            {/* Uploading spinner */}
+            {/* Uploading indicator */}
             {uploadState === UPLOAD_STATE.UPLOADING && (
-                <div className="flex items-center justify-center w-full h-full">
-                    <span className="animate-spin text-primary text-sm">◌</span>
+                <div className="flex flex-col items-center justify-center w-full h-full absolute inset-0 bg-black/60 z-10 animate-pulse">
+                    <div className="w-4 h-4 rounded-full border border-primary/30 border-t-primary animate-spin mb-0.5" />
+                    <span className="text-[8px] font-black text-primary">{progress}%</span>
                 </div>
             )}
 
             {/* Ready state */}
             {uploadState === UPLOAD_STATE.READY && (
                 <div className="flex flex-col items-center justify-center gap-1 w-full h-full absolute inset-0 bg-primary/10">
-                    {icon}
-                    <span className="text-[9px] text-primary font-bold">READY</span>
+                    {previewUrl ? (
+                         isVideo ? (
+                             <video src={previewUrl} className="w-full h-full object-cover" muted />
+                         ) : (
+                             <img src={previewUrl} alt="" className="w-full h-full object-cover" />
+                         )
+                    ) : (
+                        <>
+                            {icon}
+                            <span className="text-[9px] text-primary font-bold">READY</span>
+                        </>
+                    )}
                 </div>
             )}
         </button>
@@ -233,6 +244,11 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
     const [audioName, setAudioName] = useState('');
     const [audioUrl, setAudioUrl] = useState(null);
 
+    // ── Individual progress states ──
+    const [imageProgress, setImageProgress] = useState(0);
+    const [videoProgress, setVideoProgress] = useState(0);
+    const [audioProgress, setAudioProgress] = useState(0);
+
     // ── Prompt ──────────────────────────────────────────────────────────────
     const [prompt, setPrompt] = useState('');
 
@@ -273,41 +289,68 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
 
     // ── Upload handlers ─────────────────────────────────────────────────────
     const handleImageUpload = useCallback(async (file) => {
+        if (file.size > 10 * 1024 * 1024) {
+            alert("Image exceeds 10MB limit.");
+            return;
+        }
         setImageState(UPLOAD_STATE.UPLOADING);
+        setImageProgress(0);
         try {
-            const url = await uploadFile(apiKey, file);
+            const url = await uploadFile(apiKey, file, (pct) => {
+                setImageProgress(pct);
+            });
             setImageUrl(url);
             setImageName(file.name);
             setImageState(UPLOAD_STATE.READY);
         } catch (err) {
             setImageState(UPLOAD_STATE.IDLE);
             alert(`Image upload failed: ${err.message}`);
+        } finally {
+            setImageProgress(0);
         }
     }, [apiKey]);
 
     const handleVideoPick = useCallback(async (file) => {
+        if (file.size > 50 * 1024 * 1024) {
+            alert("Video exceeds 50MB limit.");
+            return;
+        }
         setVideoState(UPLOAD_STATE.UPLOADING);
+        setVideoProgress(0);
         try {
-            const url = await uploadFile(apiKey, file);
+            const url = await uploadFile(apiKey, file, (pct) => {
+                setVideoProgress(pct);
+            });
             setVideoUrl(url);
             setVideoName(file.name);
             setVideoState(UPLOAD_STATE.READY);
         } catch (err) {
             setVideoState(UPLOAD_STATE.IDLE);
             alert(`Video upload failed: ${err.message}`);
+        } finally {
+            setVideoProgress(0);
         }
     }, [apiKey]);
 
     const handleAudioPick = useCallback(async (file) => {
+        if (file.size > 10 * 1024 * 1024) {
+            alert("Audio file exceeds 10MB limit.");
+            return;
+        }
         setAudioState(UPLOAD_STATE.UPLOADING);
+        setAudioProgress(0);
         try {
-            const url = await uploadFile(apiKey, file);
+            const url = await uploadFile(apiKey, file, (pct) => {
+                setAudioProgress(pct);
+            });
             setAudioUrl(url);
             setAudioName(file.name);
             setAudioState(UPLOAD_STATE.READY);
         } catch (err) {
             setAudioState(UPLOAD_STATE.IDLE);
             alert(`Audio upload failed: ${err.message}`);
+        } finally {
+            setAudioProgress(0);
         }
     }, [apiKey]);
 
@@ -541,9 +584,16 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                             </svg>
                                         }
                                         onUpload={handleImageUpload}
-                                        onClear={() => { setImageUrl(null); setImageState(UPLOAD_STATE.IDLE); setImageName(''); }}
+                                        onClear={() => { 
+                                            setImageUrl(null); 
+                                            setImageState(UPLOAD_STATE.IDLE); 
+                                            setImageName(''); 
+                                        }}
                                         uploadState={imageState}
+                                        progress={imageProgress}
                                         fileName={imageName}
+                                        previewUrl={imageUrl}
+                                        isVideo={false}
                                         apiKey={apiKey}
                                     />
                                 )}
@@ -555,9 +605,16 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                         label="Video"
                                         icon={<VideoIcon />}
                                         onUpload={handleVideoPick}
-                                        onClear={() => { setVideoUrl(null); setVideoState(UPLOAD_STATE.IDLE); setVideoName(''); }}
+                                        onClear={() => { 
+                                            setVideoUrl(null); 
+                                            setVideoState(UPLOAD_STATE.IDLE); 
+                                            setVideoName(''); 
+                                        }}
                                         uploadState={videoState}
+                                        progress={videoProgress}
                                         fileName={videoName}
+                                        previewUrl={videoUrl}
+                                        isVideo={true}
                                         apiKey={apiKey}
                                     />
                                 )}
@@ -570,7 +627,10 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                     onUpload={handleAudioPick}
                                     onClear={() => { setAudioUrl(null); setAudioState(UPLOAD_STATE.IDLE); setAudioName(''); }}
                                     uploadState={audioState}
+                                    progress={audioProgress}
                                     fileName={audioName}
+                                    previewUrl={null}
+                                    isVideo={false}
                                     apiKey={apiKey}
                                 />
 

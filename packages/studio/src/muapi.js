@@ -121,21 +121,52 @@ export async function processLipSync(apiKey, params) {
     return submitAndPoll(endpoint, payload, apiKey, params.onRequestId, 900);
 }
 
-export async function uploadFile(apiKey, file) {
-    const url = `${BASE_URL}/api/v1/upload_file`;
-    const formData = new FormData();
-    formData.append('file', file);
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey },
-        body: formData
+export function uploadFile(apiKey, file, onProgress) {
+    return new Promise((resolve, reject) => {
+        const url = `${BASE_URL}/api/v1/upload_file`;
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('x-api-key', apiKey);
+
+        if (onProgress) {
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                    const percentComplete = Math.round((event.loaded / event.total) * 100);
+                    onProgress(percentComplete);
+                }
+            };
+        }
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    const fileUrl = data.url || data.file_url || data.data?.url;
+                    if (!fileUrl) {
+                        reject(new Error('No URL returned from file upload'));
+                    } else {
+                        resolve(fileUrl);
+                    }
+                } catch (e) {
+                    reject(new Error('Failed to parse upload response'));
+                }
+            } else {
+                let detail = xhr.statusText;
+                try {
+                    const errObj = JSON.parse(xhr.responseText);
+                    detail = errObj.detail || detail;
+                } catch (e) {
+                    // fallback to statusText
+                }
+                reject(new Error(`File upload failed: ${xhr.status} - ${detail}`));
+            }
+        };
+
+        xhr.onerror = () => reject(new Error('Network error during file upload'));
+        xhr.send(formData);
     });
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`File upload failed: ${response.status} - ${errText.slice(0, 100)}`);
-    }
-    const data = await response.json();
-    const fileUrl = data.url || data.file_url || data.data?.url;
-    if (!fileUrl) throw new Error('No URL returned from file upload');
-    return fileUrl;
 }
+

@@ -17,8 +17,10 @@ export default function StandaloneShell() {
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState('image');
   const [showSettings, setShowSettings] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
+    setHasMounted(true);
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) setApiKey(stored);
   }, []);
@@ -32,6 +34,12 @@ export default function StandaloneShell() {
     localStorage.removeItem(STORAGE_KEY);
     setApiKey(null);
   }, []);
+
+  if (!hasMounted) return (
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+      <div className="animate-spin text-[#d9ff00] text-3xl">◌</div>
+    </div>
+  );
 
   if (!apiKey) {
     return <ApiKeyModal onSave={handleKeySave} />;
